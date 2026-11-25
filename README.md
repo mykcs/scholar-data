@@ -8,11 +8,11 @@ The JSON contains schema version, source, exact author ID/profile URL, citation 
 
 ## Collection and cost
 
-A standard GitHub-hosted runner in this public repository schedules one refresh attempt per UTC day (07:23 UTC), with an explicit manual trigger for verification. A committed reservation precedes the network request and prevents ordinary retries or manual runs from making a second daily attempt. Concurrent workflow runs are serialized. A provider failure keeps the last good snapshot. Updating the data does not build a homepage.
+The owner-selected schedule is once a week on Monday at 09:00 America/Los_Angeles (Tuesday 01:00 SGT in Pacific standard time, Tuesday 00:00 SGT in Pacific daylight time). GitHub's native IANA timezone schedule handles DST. A committed local-calendar-week reservation precedes any provider author search. Manual recovery is allowed only after that week's scheduled time and only if the week has not already been reserved. Retries cannot repeat a reserved week; concurrent workflow runs are serialized. The previous daily reservation remains valid for the week in which it occurred. On failure the last verified data is retained.
 
-- Current transition mode: when the repository secret is absent, read the existing public SerpApi-backed bridge. Its source cache can delay actual observation refresh; do not interpret a daily collection attempt as daily fresh data.
-- Independent direct mode: configure the repository-scoped encrypted `SERPAPI_API_KEY` through GitHub Secrets after owner authorization. The collector checks the free account allowance before one author query, refuses paid/unknown plans, extra credits or depleted quota, and never exposes the key or account response. No fallback to the bridge after a direct-mode failure. Once real direct collection is accepted, the legacy bridge can be retired separately.
-- GitHub Actions: standard GitHub-hosted runners are free for public repositories; no paid runners or artifacts. SerpApi's Free plan currently includes 250 searches/month. One scheduled attempt per UTC day is at most 31 author queries/month by this collector. Other consumers and provider terms can change.
+- This deliberately public repository contains only public author citation metadata, collection code, tests, documentation and reservation metadata. The actual homepage source stays separate. A repository-scoped encrypted Actions secret is never stored in Git or shared JSON. Forks do not receive that secret; the workflow runs only on the default branch and has no pull-request trigger.
+- Direct independent collection: the configured `SERPAPI_API_KEY` is verified using the free Account API before exactly one author query. The guard rejects paid/unknown plans, extra credits and depleted allowance. Missing credentials or provider failure fail closed without falling back to a homepage host. The first independent author observation remains pending until the next eligible weekly run; the free-account preflight already passed.
+- GitHub Actions: standard hosted runners are free in public repositories. No paid runners or artifacts. At most one author search attempt per Los Angeles calendar week, normally four or five per month (depending on the dates and any delayed manual recovery). Updates do not build either homepage.
 
 References: https://docs.github.com/en/actions/concepts/billing-and-usage ; https://serpapi.com/pricing ; https://serpapi.com/google-scholar-author-api
 
@@ -20,10 +20,10 @@ Official profile: https://scholar.google.com/citations?user=01amzbYAAAAJ
 
 ## Credential and free-plan preflight
 
-Run the manual **Verify Scholar free account** workflow on `main` to validate the configured repository secret against the provider's free Account API. It has read-only repository permissions, performs no author search, publishes no account details or credential values, and does not reset or spend the daily collection reservation. Passing this preflight verifies account access and the quota guard, not a fresh author observation. The next eligible daily refresh must still succeed before the legacy bridge can be retired.
+Run the manual **Verify Scholar free account** workflow on `main` to validate the configured repository secret against the provider's free Account API. It has read-only repository permissions, performs no author search, publishes no account details or credential values, and does not reset or spend the weekly collection reservation. Passing this preflight verifies account access and the quota guard, not a fresh author observation. The next eligible weekly refresh must still succeed to prove real direct author acquisition. The independent collector no longer uses the legacy bridge.
 
 ## Local checks
 
 `node --test refresh.test.mjs` uses mocked network responses and never contacts the provider.
 
-The daily workflow owns the refresh state and snapshot. Do not manually edit the citation count or use a browser visit as a source refresh timestamp. No credentials, private source links, or internal data belong in the public repository.
+The weekly workflow owns the refresh state and snapshot. Do not manually edit the citation count or use a browser visit as a source refresh timestamp. No credentials, private source links, or internal data belong in the public repository.
