@@ -126,27 +126,10 @@ export function collectionSlot(now = Date.now()) {
   return {week:monday,eligible:weekday!==0 || Number(parts.hour)>=9};
 }
 
-// One owner-authorized migration acceptance, limited to the recorded bridge
-// reservation from the initial 2026-11-25 run. It cannot be used after this
-// calendar week, on any direct reservation, or by the scheduled trigger.
-const LEGACY_BRIDGE_ATTEMPT = '2026-11-25T11:03:13.654Z';
-
-export function reserve(state, now = Date.now(), {migrationTest=false} = {}) {
+export function reserve(state, now = Date.now()) {
   const date=new Date(now).toISOString();
   const slot=collectionSlot(now);
   if (!slot.eligible || !state || typeof state!=='object' || !Object.hasOwn(state,'lastAttemptDate') || !Object.hasOwn(state,'lastAttemptAt')) return null;
-  if (migrationTest) {
-    if (state.lastAttemptAt!==LEGACY_BRIDGE_ATTEMPT ||
-        state.lastAttemptDate!=='2026-11-25' ||
-        state.lastAttemptWeek!=null ||
-        state.migrationAcceptance!=null ||
-        Date.parse(LEGACY_BRIDGE_ATTEMPT)>now ||
-        collectionSlot(Date.parse(LEGACY_BRIDGE_ATTEMPT)).week!==slot.week) return null;
-    return {
-      lastAttemptWeek:slot.week,lastAttemptDate:date.slice(0,10),lastAttemptAt:date,
-      migrationAcceptance:{priorBridgeAttemptAt:LEGACY_BRIDGE_ATTEMPT,directAttemptAt:date},
-    };
-  }
   // Preserve the original daily reservation when migrating to weekly scheduling.
   // Do not reset the current week merely because the cadence has changed.
   if (state.lastAttemptAt!==null || state.lastAttemptDate!==null || state.lastAttemptWeek!=null) {
@@ -174,12 +157,10 @@ async function main() {
     await verifyFreeAccount({key:process.env.SERPAPI_API_KEY || ''});
     console.log('PASS: active Free plan, $0 monthly price, no extra credits, quota guard satisfied. Account API only; no author search attempted.');
   } else if (process.argv[2]==='reserve') {
-    const migrationTest=process.env.GITHUB_EVENT_NAME==='workflow_dispatch' &&
-      process.env.SCHOLAR_MIGRATION_TEST==='true';
-    const next=reserve(read('refresh-state.json'),Date.now(),{migrationTest});
+    const next=reserve(read('refresh-state.json'));
     if (next) write('refresh-state.json',next);
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,'run='+Boolean(next)+'\n');
-    console.log(next?(migrationTest?'Reserved one-time direct migration acceptance; historical bridge reservation retained':'Reserved one Los Angeles calendar-week collection attempt'):'Skipped: weekly slot not eligible, already reserved, or invalid state');
+    console.log(next?'Reserved one Los Angeles calendar-week collection attempt':'Skipped: weekly slot not eligible, already reserved, or invalid state');
   } else if (process.argv[2]==='collect') {
     const state=read('refresh-state.json');
     if (!hasCurrentReservation(state)) throw new Error('No valid current-week reservation');

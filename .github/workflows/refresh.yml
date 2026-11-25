@@ -4,11 +4,6 @@ on:
     - cron: '0 9 * * 1'
       timezone: 'America/Los_Angeles'
   workflow_dispatch:
-    inputs:
-      verify_migration:
-        description: 'One-time direct acceptance of the recorded initial bridge run (expires this week)'
-        type: boolean
-        default: false
 permissions:
   contents: write
 concurrency:
@@ -27,8 +22,6 @@ jobs:
         run: node --test refresh.test.mjs
       - name: Reserve one Los Angeles calendar-week collection attempt
         id: reserve
-        env:
-          SCHOLAR_MIGRATION_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_migration }}
         run: node refresh.mjs reserve
       - name: Persist reservation before any external query
         if: steps.reserve.outputs.run == 'true'
