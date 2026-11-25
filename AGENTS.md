@@ -1,0 +1,3 @@
+# Agent instructions
+
+This public repository is a narrow data service for source-dated, publicly visible Google Scholar author counts. Keep public contents limited to the data contract, collection logic, tests, and documentation. Never copy a credential, private project source, or private metadata here. Only the reviewed daily workflow owns refresh-state.json and scholar.json; the initial sample is a validated bootstrap observation. Keep the free-only quota guard, pre-query daily reservation, exact author validation, last-known-good retention, and no-query-on-visitor contract. No billing changes or secret configuration without specific authorization. Validate with node --test refresh.test.mjs before changing collection behavior. Do not substitute OpenAlex.
