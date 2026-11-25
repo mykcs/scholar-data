@@ -1,4 +1,9 @@
 {
+  "lastAttemptWeek": "2026-11-23",
   "lastAttemptDate": "2026-11-25",
-  "lastAttemptAt": "2026-11-25T11:03:13.654Z"
+  "lastAttemptAt": "2026-11-25T12:02:24.084Z",
+  "migrationAcceptance": {
+    "priorBridgeAttemptAt": "2026-11-25T11:03:13.654Z",
+    "directAttemptAt": "2026-11-25T12:02:24.084Z"
+  }
 }
