@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {PROFILE_ID,PROFILE_URL,SOURCE,validateSnapshot,chooseSnapshot,approvedFreePlan,collect,reserve} from './refresh.mjs';
+import {PROFILE_ID,PROFILE_URL,SOURCE,validateSnapshot,chooseSnapshot,approvedFreePlan,verifyFreeAccount,collect,reserve} from './refresh.mjs';
 const now=Date.parse('2026-11-25T10:00:00Z');
 const snap={schemaVersion:1,source:SOURCE,profileId:PROFILE_ID,profileUrl:PROFILE_URL,citations:9,fetchedAt:'2026-11-25T09:00:00.000Z'};
 const account={account_status:'Active',plan_id:'free',plan_name:'Free Plan',plan_monthly_price:0,searches_per_month:250,extra_credits:0,plan_searches_left:240,total_searches_left:240,this_hour_searches:1};
@@ -41,4 +41,28 @@ test('reservation is one per UTC day even on retry',()=>{
  const next=reserve({lastAttemptDate:null},now);assert.equal(next.lastAttemptDate,'2026-11-25');
  assert.equal(reserve(next,now+3600000),null);
  assert.ok(reserve(next,now+86400000));
+});
+
+test('account-only preflight calls exactly the free Account API, never the author search',async()=>{
+ let n=0;
+ assert.equal(await verifyFreeAccount({key:'test-only',fetcher:async url=>{
+   n++;
+   assert.equal(url.hostname,'serpapi.com');
+   assert.equal(url.pathname,'/account.json');
+   return response(account);
+ }}),true);
+ assert.equal(n,1);
+});
+test('account-only preflight fails closed on missing key, paid or depleted plan',async()=>{
+ let n=0;
+ await assert.rejects(verifyFreeAccount({fetcher:async()=>{n++;return response(account)}}));
+ assert.equal(n,0);
+ for(const change of [{plan_monthly_price:1},{plan_searches_left:19},{extra_credits:1}]){
+   await assert.rejects(verifyFreeAccount({key:'test-only',fetcher:async url=>{
+     n++;
+     assert.equal(url.pathname,'/account.json');
+     return response({...account,...change});
+   }}));
+ }
+ assert.equal(n,3);
 });

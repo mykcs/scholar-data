@@ -79,6 +79,15 @@ async function json(url, fetcher, signal) {
   }
 }
 
+// Account-only validation uses the provider's free Account API, never an author search.
+export async function verifyFreeAccount({key='',fetcher=fetch,signal=AbortSignal.timeout(15000)}={}) {
+  if (!key.trim()) throw new Error('Scholar credential is not configured');
+  const accountURL = new URL('https://serpapi.com/account.json');
+  accountURL.searchParams.set('api_key',key);
+  if (!approvedFreePlan(await json(accountURL,fetcher,signal))) throw new Error('Free-plan quota guard rejected query');
+  return true;
+}
+
 export async function collect({key='',fetcher=fetch,now=Date.now()}={}) {
   const signal = AbortSignal.timeout(15000);
   if (!key.trim()) {
@@ -86,9 +95,7 @@ export async function collect({key='',fetcher=fetch,now=Date.now()}={}) {
     if (typeof data.stale !== 'boolean') throw new Error('Invalid bridge response');
     return validateSnapshot(data,now);
   }
-  const accountURL = new URL('https://serpapi.com/account.json');
-  accountURL.searchParams.set('api_key',key);
-  if (!approvedFreePlan(await json(accountURL,fetcher,signal))) throw new Error('Free-plan quota guard rejected query');
+  await verifyFreeAccount({key,fetcher,signal});
   const searchURL = new URL('https://serpapi.com/search.json');
   for (const [k,v] of Object.entries({engine:'google_scholar_author',author_id:PROFILE_ID,hl:'en',num:'1',api_key:key})) searchURL.searchParams.set(k,v);
   const data = await json(searchURL,fetcher,signal);
@@ -116,7 +123,10 @@ export function reserve(state, now = Date.now()) {
 }
 
 async function main() {
-  if (process.argv[2]==='reserve') {
+  if (process.argv[2]==='verify-account') {
+    await verifyFreeAccount({key:process.env.SERPAPI_API_KEY || ''});
+    console.log('PASS: active Free plan, $0 monthly price, no extra credits, quota guard satisfied. Account API only; no author search attempted.');
+  } else if (process.argv[2]==='reserve') {
     const next=reserve(read('refresh-state.json'));
     if (next) write('refresh-state.json',next);
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,'run='+Boolean(next)+'\n');
@@ -129,7 +139,7 @@ async function main() {
     const chosen=chooseSnapshot(read('scholar.json'),sample);
     write('scholar.json',chosen);
     console.log('Validated source snapshot via '+(key.trim()?'direct free-plan provider':'existing bridge')+': '+chosen.citations+' at '+chosen.fetchedAt);
-  } else throw new Error('Expected reserve or collect');
+  } else throw new Error('Expected verify-account, reserve or collect');
 }
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   main().catch(()=>{console.error('Scholar refresh failed; last verified data retained');process.exitCode=1});
