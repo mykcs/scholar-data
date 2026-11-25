@@ -99,22 +99,14 @@ test('account-only preflight fails closed on missing key, paid or depleted plan'
  assert.equal(n,3);
 });
 
-test('explicit one-time direct migration acceptance preserves the historical bridge attempt and the weekly cap',()=>{
- const bridge={lastAttemptDate:'2026-11-25',lastAttemptAt:'2026-11-25T11:03:13.654Z'};
- const time=Date.parse('2026-11-25T12:01:00Z');
- assert.equal(reserve(bridge,time),null);
- const next=reserve(bridge,time,{migrationTest:true});
- assert.equal(next.lastAttemptWeek,'2026-11-23');
- assert.equal(next.migrationAcceptance.priorBridgeAttemptAt,bridge.lastAttemptAt);
- assert.equal(next.migrationAcceptance.directAttemptAt,next.lastAttemptAt);
- assert.ok(hasCurrentReservation(next,time));
- assert.equal(reserve(next,time+1000),null);
- assert.equal(reserve(next,time+1000,{migrationTest:true}),null);
- assert.equal(reserve({...bridge,lastAttemptWeek:'2026-11-23'},time,{migrationTest:true}),null);
- assert.equal(reserve({...bridge,lastAttemptAt:'2026-11-25T11:03:13.655Z'},time,{migrationTest:true}),null);
- assert.equal(reserve(bridge,Date.parse('2026-11-30T17:00:00Z'),{migrationTest:true}),null);
- assert.equal(reserve(bridge,time-86400000,{migrationTest:true}),null);
- const following=reserve(next,Date.parse('2026-11-30T17:00:00Z'));
- assert.deepEqual(following.migrationAcceptance,next.migrationAcceptance);
+test('completed migration receipt is immutable history; no same-week migration override remains',()=>{
+ const receipt={lastAttemptWeek:'2026-11-23',lastAttemptDate:'2026-11-25',lastAttemptAt:'2026-11-25T12:02:24.084Z',migrationAcceptance:{priorBridgeAttemptAt:'2026-11-25T11:03:13.654Z',directAttemptAt:'2026-11-25T12:02:24.084Z'}};
+ const time=Date.parse('2026-11-25T12:05:00Z');
+ assert.equal(reserve(receipt,time),null);
+ assert.equal(reserve(receipt,time,{migrationTest:true}),null);
+ const oldBridge={lastAttemptDate:'2026-11-25',lastAttemptAt:'2026-11-25T11:03:13.654Z'};
+ assert.equal(reserve(oldBridge,time,{migrationTest:true}),null);
+ const following=reserve(receipt,Date.parse('2026-11-30T17:00:00Z'));
+ assert.deepEqual(following.migrationAcceptance,receipt.migrationAcceptance);
  assert.equal(following.lastAttemptWeek,'2026-11-30');
 });
