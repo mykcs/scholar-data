@@ -18,6 +18,10 @@ References: https://docs.github.com/en/actions/concepts/billing-and-usage ; http
 
 Official profile: https://scholar.google.com/citations?user=01amzbYAAAAJ
 
+## Credential and free-plan preflight
+
+Run the manual **Verify Scholar free account** workflow on `main` to validate the configured repository secret against the provider's free Account API. It has read-only repository permissions, performs no author search, publishes no account details or credential values, and does not reset or spend the daily collection reservation. Passing this preflight verifies account access and the quota guard, not a fresh author observation. The next eligible daily refresh must still succeed before the legacy bridge can be retired.
+
 ## Local checks
 
 `node --test refresh.test.mjs` uses mocked network responses and never contacts the provider.
