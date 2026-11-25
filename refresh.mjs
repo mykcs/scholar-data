@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 export const PROFILE_ID = '01amzbYAAAAJ';
 export const PROFILE_URL = 'https://scholar.google.com/citations?user=' + PROFILE_ID;
 export const SOURCE = 'google-scholar-via-serpapi';
-const BRIDGE = 'https://wangrui92.pages.dev/api/scholar';
+export const COLLECTION_TIMEZONE = 'America/Los_Angeles';
 const DAY = 86400000;
 const MAX_BYTES = 128 * 1024;
 const MAX_CITATIONS = 1_000_000_000;
@@ -90,11 +90,7 @@ export async function verifyFreeAccount({key='',fetcher=fetch,signal=AbortSignal
 
 export async function collect({key='',fetcher=fetch,now=Date.now()}={}) {
   const signal = AbortSignal.timeout(15000);
-  if (!key.trim()) {
-    const data = await json(BRIDGE,fetcher,signal);
-    if (typeof data.stale !== 'boolean') throw new Error('Invalid bridge response');
-    return validateSnapshot(data,now);
-  }
+  // The configured independent collector is the sole acquisition owner. Fail closed if unavailable.
   await verifyFreeAccount({key,fetcher,signal});
   const searchURL = new URL('https://serpapi.com/search.json');
   for (const [k,v] of Object.entries({engine:'google_scholar_author',author_id:PROFILE_ID,hl:'en',num:'1',api_key:key})) searchURL.searchParams.set(k,v);
@@ -115,11 +111,45 @@ export async function collect({key='',fetcher=fetch,now=Date.now()}={}) {
 
 function read(path) {return JSON.parse(readFileSync(path,'utf8'))}
 function write(path,value) {writeFileSync(path,JSON.stringify(value,null,2)+'\n')}
+const localCalendar = new Intl.DateTimeFormat('en-CA', {
+  timeZone:COLLECTION_TIMEZONE,year:'numeric',month:'2-digit',day:'2-digit',
+  hour:'2-digit',minute:'2-digit',hourCycle:'h23',
+});
+
+// A week is a local Monday-Sunday calendar week, not a fixed UTC interval.
+// Compute the Monday from the local calendar date so DST and year boundaries are safe.
+export function collectionSlot(now = Date.now()) {
+  const parts=Object.fromEntries(localCalendar.formatToParts(new Date(now)).map(p=>[p.type,p.value]));
+  const localDay=Date.UTC(+parts.year,+parts.month-1,+parts.day);
+  const weekday=(new Date(localDay).getUTCDay()+6)%7;
+  const monday=new Date(localDay-weekday*DAY).toISOString().slice(0,10);
+  return {week:monday,eligible:weekday!==0 || Number(parts.hour)>=9};
+}
+
 export function reserve(state, now = Date.now()) {
   const date=new Date(now).toISOString();
-  const day=date.slice(0,10);
-  if (state.lastAttemptDate && (!/^\d{4}-\d{2}-\d{2}$/.test(state.lastAttemptDate) || state.lastAttemptDate >= day)) return null;
-  return {lastAttemptDate:day,lastAttemptAt:date};
+  const slot=collectionSlot(now);
+  if (!slot.eligible || !state || typeof state!=='object' || !Object.hasOwn(state,'lastAttemptDate') || !Object.hasOwn(state,'lastAttemptAt')) return null;
+  // Preserve the original daily reservation when migrating to weekly scheduling.
+  // Do not reset the current week merely because the cadence has changed.
+  if (state.lastAttemptAt!==null || state.lastAttemptDate!==null || state.lastAttemptWeek!=null) {
+    const previous=strictTime(state.lastAttemptAt);
+    if (!Number.isFinite(previous) || previous>now ||
+        state.lastAttemptDate!==new Date(previous).toISOString().slice(0,10)) return null;
+    const previousWeek=collectionSlot(previous).week;
+    if (state.lastAttemptWeek!=null && state.lastAttemptWeek!==previousWeek) return null;
+    if (previousWeek>=slot.week) return null;
+  }
+  return {lastAttemptWeek:slot.week,lastAttemptDate:date.slice(0,10),lastAttemptAt:date};
+}
+
+export function hasCurrentReservation(state, now=Date.now()) {
+  const slot=collectionSlot(now);
+  const reservedAt=strictTime(state?.lastAttemptAt);
+  return slot.eligible && Number.isFinite(reservedAt) && reservedAt<=now &&
+    state.lastAttemptDate===new Date(reservedAt).toISOString().slice(0,10) &&
+    state.lastAttemptWeek===slot.week && collectionSlot(reservedAt).week===slot.week &&
+    collectionSlot(reservedAt).eligible;
 }
 
 async function main() {
@@ -130,15 +160,15 @@ async function main() {
     const next=reserve(read('refresh-state.json'));
     if (next) write('refresh-state.json',next);
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,'run='+Boolean(next)+'\n');
-    console.log(next?'Reserved one UTC-day collection attempt':'Skipped: already reserved today');
+    console.log(next?'Reserved one Los Angeles calendar-week collection attempt':'Skipped: weekly slot not eligible, already reserved, or invalid state');
   } else if (process.argv[2]==='collect') {
     const state=read('refresh-state.json');
-    if (state.lastAttemptDate!==new Date().toISOString().slice(0,10)) throw new Error('No current-day reservation');
+    if (!hasCurrentReservation(state)) throw new Error('No valid current-week reservation');
     const key=process.env.SERPAPI_API_KEY || '';
     const sample=await collect({key});
     const chosen=chooseSnapshot(read('scholar.json'),sample);
     write('scholar.json',chosen);
-    console.log('Validated source snapshot via '+(key.trim()?'direct free-plan provider':'existing bridge')+': '+chosen.citations+' at '+chosen.fetchedAt);
+    console.log('Validated source snapshot via direct free-plan provider: '+chosen.citations+' at '+chosen.fetchedAt);
   } else throw new Error('Expected verify-account, reserve or collect');
 }
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {

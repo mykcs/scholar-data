@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {PROFILE_ID,PROFILE_URL,SOURCE,validateSnapshot,chooseSnapshot,approvedFreePlan,verifyFreeAccount,collect,reserve} from './refresh.mjs';
+import {PROFILE_ID,PROFILE_URL,SOURCE,validateSnapshot,chooseSnapshot,approvedFreePlan,verifyFreeAccount,collect,reserve,collectionSlot,hasCurrentReservation} from './refresh.mjs';
 const now=Date.parse('2026-11-25T10:00:00Z');
 const snap={schemaVersion:1,source:SOURCE,profileId:PROFILE_ID,profileUrl:PROFILE_URL,citations:9,fetchedAt:'2026-11-25T09:00:00.000Z'};
 const account={account_status:'Active',plan_id:'free',plan_name:'Free Plan',plan_monthly_price:0,searches_per_month:250,extra_credits:0,plan_searches_left:240,total_searches_left:240,this_hour_searches:1};
@@ -19,10 +19,10 @@ test('paid, extra credits, depleted and unknown plans fail closed',()=>{
  assert.ok(approvedFreePlan(account));
  for(const change of [{plan_id:'paid'},{plan_monthly_price:1},{extra_credits:1},{plan_searches_left:19},{total_searches_left:0},{this_hour_searches:40},{account_status:'Inactive'}]) assert.equal(approvedFreePlan({...account,...change}),false);
 });
-test('bridge returns only public schema',async()=>{
+test('missing credential fails closed without a legacy bridge or provider call',async()=>{
  let n=0;
- const result=await collect({now,fetcher:async url=>{n++;assert.equal(String(url),'https://wangrui92.pages.dev/api/scholar');return response({...snap,stale:false,unexpected:'omit'});}});
- assert.equal(n,1);assert.deepEqual(result,snap);
+ await assert.rejects(collect({now,fetcher:async()=>{n++;return response(snap)}}));
+ assert.equal(n,0);
 });
 test('direct free plan uses exactly one search after free account check',async()=>{
  let n=0;
@@ -37,10 +37,42 @@ test('direct free plan uses exactly one search after free account check',async()
 test('quota failure never invokes search',async()=>{
  let n=0;await assert.rejects(collect({key:'test-only',now,fetcher:async()=>{n++;return response({...account,plan_monthly_price:25})}}));assert.equal(n,1);
 });
-test('reservation is one per UTC day even on retry',()=>{
- const next=reserve({lastAttemptDate:null},now);assert.equal(next.lastAttemptDate,'2026-11-25');
- assert.equal(reserve(next,now+3600000),null);
- assert.ok(reserve(next,now+86400000));
+test('weekly reservation preserves the previous daily attempt and rejects same-week retries',()=>{
+ const old={lastAttemptDate:'2026-11-25',lastAttemptAt:'2026-11-25T11:03:13.654Z'};
+ assert.equal(reserve(old,Date.parse('2026-11-25T20:00:00Z')),null);
+ assert.equal(reserve(old,Date.parse('2026-11-30T16:59:59Z')),null);
+ const first=Date.parse('2026-11-30T17:00:00Z'); // Monday 09:00 PST
+ const next=reserve(old,first);
+ assert.equal(next.lastAttemptWeek,'2026-11-30');
+ assert.equal(next.lastAttemptDate,'2026-11-30');
+ assert.ok(hasCurrentReservation(next,first+60000));
+ assert.equal(reserve(next,first+6*86400000),null);
+ assert.equal(reserve(next,Date.parse('2026-12-07T16:59:59Z')),null);
+ assert.ok(reserve(next,Date.parse('2026-12-07T17:00:00Z')));
+ assert.equal(hasCurrentReservation(next,Date.parse('2026-12-07T17:00:00Z')),false);
+});
+test('Los Angeles 09:00 uses native calendar weeks across DST and year boundaries',()=>{
+ for(const [winterOrSummer,monday] of [
+   ['2026-11-30T17:00:00Z','2026-11-30'],
+   ['2027-07-05T16:00:00Z','2027-07-05'],
+   ['2027-03-08T17:00:00Z','2027-03-08'],
+   ['2027-03-15T16:00:00Z','2027-03-15'],
+   ['2027-11-01T16:00:00Z','2027-11-01'],
+   ['2027-11-08T17:00:00Z','2027-11-08'],
+   ['2027-01-04T17:00:00Z','2027-01-04'],
+ ]){
+   const t=Date.parse(winterOrSummer);
+   assert.deepEqual(collectionSlot(t),{week:monday,eligible:true});
+   assert.deepEqual(collectionSlot(t-1000),{week:monday,eligible:false});
+ }
+ assert.equal(collectionSlot(Date.parse('2027-01-01T12:00:00Z')).week,'2026-12-28');
+});
+test('malformed or future reservation fails closed; valid empty state reserves once',()=>{
+ const first=Date.parse('2026-11-30T17:00:00Z');
+ const empty={lastAttemptDate:null,lastAttemptAt:null};
+ assert.ok(reserve(empty,first));
+ for(const invalid of [{},{lastAttemptDate:'2026-11-25',lastAttemptAt:null},{lastAttemptDate:'2026-11-24',lastAttemptAt:'2026-11-25T11:00:00Z'},{lastAttemptDate:'2026-12-01',lastAttemptAt:'2026-12-01T01:00:00Z'},{lastAttemptDate:'2026-11-25',lastAttemptAt:'2026-11-25T11:00:00Z',lastAttemptWeek:'2026-11-16'}]) assert.equal(reserve(invalid,first),null);
+ assert.equal(hasCurrentReservation(empty,first),false);
 });
 
 test('account-only preflight calls exactly the free Account API, never the author search',async()=>{
